@@ -47,46 +47,22 @@ encoder = RotaryIRQ(pin_num_clk=CLK,
 # If you get these functions to work there should be no hardware
 
 #Custom Chars
-hourglass_down = bytearray([0x1F, 0x11, 0x0A, 0x04, 0x04, 0x0E, 0x1F, 0x1F])
-hourglass_up = bytearray([0x1F, 0x1F, 0x0E, 0x04, 0x04, 0x0A, 0x11, 0x1F])
-number_symbol = bytearray([0x0C, 0x12, 0x12, 0x0C, 0x00, 0x1E, 0x00, 0x00])
 arrow_right = bytearray([0x00, 0x04, 0x06, 0x1F, 0x1F, 0x06, 0x04, 0x00])
 arrow_left = bytearray([0x00, 0x04, 0x0C, 0x1F, 0x1F, 0x0C, 0x04, 0x00])
-char_e = bytearray([0x00, 0x00, 0x00, 0x0C, 0x12, 0x1C, 0x10, 0x0E])
-char_i = bytearray([0x00, 0x00, 0x00, 0x08, 0x18, 0x08, 0x08, 0x0C])
 
                 
-lcd.custom_char(0, number_symbol)
-lcd.custom_char(1, arrow_right)
-lcd.custom_char(2, arrow_left)
-lcd.custom_char(3, char_e)
-lcd.custom_char(4, char_i)
-
-
-def display(text):
-    lcd.move_to(3,0)
-    lcd.putstr(text)
-     
+lcd.custom_char(0, arrow_right)
+lcd.custom_char(1, arrow_left)
 
 def display_ops(menu, value):
     global lcd
     lcd.move_to(0, 1)
     lcd.putstr(f"{menu[value-1][0]:<20}")
     lcd.move_to(0, 2)
-    lcd.putstr(f"{chr(1)} {menu[value][0]} {chr(2)}")
+    lcd.putstr(f"{chr(0)} {menu[value][0]} {chr(1)}")
     lcd.putstr((16 - len(menu[value][0]))*" ")
     lcd.move_to(0, 3)
     lcd.putstr(f"{menu[value - len(menu)+1][0]:<20}")
-
-
-def display_hist(menu, value):
-    global lcd
-    lcd.move_to(0, 1)
-    lcd.putstr(f"{menu[value-1]:<20}")
-    lcd.move_to(0, 2)
-    lcd.putstr(f"{menu[value]:<20}")
-    lcd.move_to(0, 3)
-    lcd.putstr(f"{menu[value - len(menu)+1]:<20}")
 
 # Encoder Functions
 def value():
@@ -292,36 +268,6 @@ class GetInteger():
         lcd.move_to(0,2)
         lcd.putstr(f"{self.value:<20}")
         
-
-class Hist():
-    "Display measurement history."
-    def __init__(self,lcd, field, title):
-        self.index = 0
-        self.lcd = lcd
-        self.field = field
-        self.title = title
-        
-    def on_scroll(self,val):
-        self.index = val
-        display_hist(self.text, self.index)
-        
-        
-    def on_click(self):
-        back()
-    
-    def mount_hist(self):
-        global menu_data
-        self.hist = menu_data.get(self.field)
-        self.text = [f"{num:>02}; {i}" for num, i in enumerate(self.hist if self.hist else 100*["!!SEM LEITURAS!!"])]
-        # print(self.text[self.index -1][0])
-    
-    
-    def on_current(self):
-        self.mount_hist()
-        set_encoder(self.index,0,len(self.text)-1)
-        
-        display_hist(self.text, self.index)
-        
         
 class Selection():
     
@@ -449,10 +395,6 @@ def  wrap_object(myobject):
 def wrap_menu(title, mymenulist):
     "wrap a list into a function so it can be set from within the menu"
     return wrap_object(Menu(title, mymenulist))
-
-def hist(lcd, field, title):
-    "Wrap simple text output into menu"
-    return wrap_object(Hist(lcd, field, title))
 
 def selection(field, mylist, title):
     "Wrap a selection into menu"
