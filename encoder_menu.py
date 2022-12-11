@@ -1,6 +1,5 @@
 from machine import Pin, SoftI2C
 import sys
-from json import dump, load
 from lcd_api import LcdApi
 from i2c_lcd import I2cLcd
 import uasyncio as asyncio
@@ -10,9 +9,6 @@ SDA, SCL = Pin(21), Pin(22)
 
 # Encoder
 CLK, DT, button = 35, 34, Pin(39, Pin.IN)
-
-#from guimenu importMenu
-#import _thread
 
 #This section may need to be modified to suit your hardware
 from rotary_irq_esp  import RotaryIRQ
@@ -213,7 +209,7 @@ class Menu():
 class GetInteger():
     "Get an integer value by scrolling (or turning the encoder shaft)"
     global menu_data
-    def __init__(self,low_v=0,high_v=100,increment=10, caption='plain',field='datafield',default=0, save=False):
+    def __init__(self,low_v=0,high_v=100,increment=10, caption='plain',field='datafield',default=0):
         self.field = field  #for collecting data
         self.caption = caption #caption is fixed in get_integer mode
         self.increment = increment
@@ -223,7 +219,6 @@ class GetInteger():
         self.default = default
         self.value = 0
         self.get_initial_value()
-        self.save = save
 
     def get_initial_value(self):
         #print('init value',self.value,self.increment,self.default,self.field)
@@ -249,12 +244,6 @@ class GetInteger():
         global menu_data
         "Store the displayed value and go back up the menu"
         menu_data[self.field]= self.value
-        if self.save:
-            with open("calibration.json", "r") as file:
-                cal = load(file)
-            cal[self.field] = self.value
-            with open("calibration.json", "w") as file:
-                dump(cal, file)
         back()
         
     def on_current(self):
@@ -344,7 +333,7 @@ class Wizard():
         else:
             self.device.on_click() #will pop ourself
             stack.append(self) #so put ourself back
-            (self.menu[self.index][1])()#will push device
+            (self.menu[self.index])()#will push device
             self.device=current
             current=self
             stack.pop() #so we have to pop device
@@ -355,7 +344,7 @@ class Wizard():
         #(This requires fiddling the value of stack and current)
         global current
         self.index = 0 #always start at the beginning
-        (self.menu[0][1])() #do menu function which puts a new object in current
+        (self.menu[0])() #do menu function which puts a new object in current
         self.device = current #Now capture current
         current = self # restore current to self
         stack.pop() # the function pushes,so we have to pop()
@@ -400,9 +389,9 @@ def selection(field, mylist, title):
     "Wrap a selection into menu"
     return wrap_object(Selection(field, mylist, title))
 
-def get_integer(low_v=0,high_v=100,increment=10, caption='plain',field='datafield',default='DEF', save=False):
+def get_integer(low_v=0,high_v=100,increment=10, caption='plain',field='datafield',default='DEF'):
     "Wrap integer entry into menu"
-    return wrap_object(GetInteger(low_v,high_v,increment, caption,field,default, save))
+    return wrap_object(GetInteger(low_v,high_v,increment, caption,field,default))
 
 def wizard(mymenu):
     "Wrap a wizard list into a menu action"
