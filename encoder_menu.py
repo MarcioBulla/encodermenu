@@ -1,38 +1,40 @@
-
-
-#import math
-from machine import Pin, I2C
-import ssd1306
+from machine import Pin, SoftI2C
 import sys
-import time
-
+from json import dump, load
+from lcd_api import LcdApi
+from i2c_lcd import I2cLcd
 import uasyncio as asyncio
+
+# I2C Display
+SDA, SCL = Pin(21), Pin(22)
+
+# Encoder
+CLK, DT, button = 35, 34, Pin(39, Pin.IN)
 
 #from guimenu importMenu
 #import _thread
 
 #This section may need to be modified to suit your hardware
-from rotary_irq_pico  import RotaryIRQ
+from rotary_irq_esp  import RotaryIRQ
 #import uasyncio as asyncio
 
-button = Pin(18,Pin.IN,Pin.PULL_DOWN)
 
+i2c = SoftI2C(scl=SCL, sda=SDA, freq=100000)
 
-i2c = I2C(0, scl=Pin(17), sda=Pin(16))
+LED = Pin(32, Pin.OUT)
+LED.off()
 
-led = Pin(25,Pin.OUT)
+lcd = I2cLcd(i2c, 0x27, 4, 20)
 
-oled = ssd1306.SSD1306_I2C(128, 64, i2c)
-
-encoder = RotaryIRQ(pin_num_clk=12, 
-              pin_num_dt=13, 
+encoder = RotaryIRQ(pin_num_clk=CLK, 
+              pin_num_dt=DT, 
               min_val=0, 
               max_val=100, 
-              reverse=False, 
+              reverse=True, 
               range_mode=RotaryIRQ.RANGE_WRAP,
               pull_up=True)
 
-led = Pin(25,Pin.OUT)
+
 
 #!!!!!!!!!----------------
 
@@ -44,19 +46,55 @@ led = Pin(25,Pin.OUT)
 # 5. Set a flashing led as a heart beat for main loop (optional)
 # If you get these functions to work there should be no hardware
 
-def display(text1,text2):
-    oled.fill(0)
-    oled.text(text1,0,0)
-    oled.text(text2,0,30)
-    oled.show() 
-    
+#Custom Chars
+hourglass_down = bytearray([0x1F, 0x11, 0x0A, 0x04, 0x04, 0x0E, 0x1F, 0x1F])
+hourglass_up = bytearray([0x1F, 0x1F, 0x0E, 0x04, 0x04, 0x0A, 0x11, 0x1F])
+number_symbol = bytearray([0x0C, 0x12, 0x12, 0x0C, 0x00, 0x1E, 0x00, 0x00])
+arrow_right = bytearray([0x00, 0x04, 0x06, 0x1F, 0x1F, 0x06, 0x04, 0x00])
+arrow_left = bytearray([0x00, 0x04, 0x0C, 0x1F, 0x1F, 0x0C, 0x04, 0x00])
+char_e = bytearray([0x00, 0x00, 0x00, 0x0C, 0x12, 0x1C, 0x10, 0x0E])
+char_i = bytearray([0x00, 0x00, 0x00, 0x08, 0x18, 0x08, 0x08, 0x0C])
+
+                
+lcd.custom_char(0, number_symbol)
+lcd.custom_char(1, arrow_right)
+lcd.custom_char(2, arrow_left)
+lcd.custom_char(3, char_e)
+lcd.custom_char(4, char_i)
+
+
+def display(text):
+    lcd.move_to(3,0)
+    lcd.putstr(text)
+     
+
+def display_ops(menu, value):
+    global lcd
+    lcd.move_to(0, 1)
+    lcd.putstr(f"{menu[value-1][0]:<20}")
+    lcd.move_to(0, 2)
+    lcd.putstr(f"{chr(1)} {menu[value][0]} {chr(2)}")
+    lcd.putstr((16 - len(menu[value][0]))*" ")
+    lcd.move_to(0, 3)
+    lcd.putstr(f"{menu[value - len(menu)+1][0]:<20}")
+
+
+def display_hist(menu, value):
+    global lcd
+    lcd.move_to(0, 1)
+    lcd.putstr(f"{menu[value-1]:<20}")
+    lcd.move_to(0, 2)
+    lcd.putstr(f"{menu[value]:<20}")
+    lcd.move_to(0, 3)
+    lcd.putstr(f"{menu[value - len(menu)+1]:<20}")
+
+# Encoder Functions
 def value():
     return encoder._value
 
-def set_encoder(value,min_value,max_value):
-    encoder._value = value
-    encoder.set(value,min_value,max_value)
-    
+def set_encoder(value,min_value,max_value, incr=1):
+    encoder.set(value=value, min_val=min_value, max_val=max_value, incr=incr)    
+
 
 #================================
 stack = []  # For storing position in menu
@@ -88,10 +126,10 @@ def set_global_exception():
 def mainloop():
     "An asynchronous main loop"
     set_global_exception()
-    global led
+    #global led
 
     while True:
-        led(not led())
+       # led(not led())
         await step()
         
 def run_async(func):
@@ -149,9 +187,7 @@ def set_current(obj):
 #=======================
     # Task related
 
-def stop():
-    "Convenience function for stopping tasks"
-    global task
+def stop(task):
     """Our routine (neopixels in this case) is stored in a task.
     That allows us to cancel it"""
     try:
@@ -161,10 +197,10 @@ def stop():
         pass
 
  
-def make_task(func):
+def make_task(func, *args):
     "convenience function  for starting tasks"
-    global task
-    task = asyncio.create_task(func())
+    # print(f"taks args: {args}")
+    return asyncio.create_task(func(*args))
 
 
 #=============================
@@ -172,15 +208,18 @@ def make_task(func):
   
 class Menu():
     "Show a menu on a tiny dispaly by turning a rotatry encoder"
-    def __init__(self,menu):
+    def __init__(self,title, menu):
         self.menu = menu
+        self.title = title
         self.index = 0
         self.increment = 1      
         
     def on_scroll(self,value):
         "Just show the caption"
         self.index = value
-        display('', self.menu[value][0])
+        # print(self.index)
+        display_ops(self.menu, self.index)
+        
         
     def on_click(self):
         "Execute the menu item's function"
@@ -188,14 +227,17 @@ class Menu():
     
     def on_current(self):
         "Set (and fix if necessary) the index"           
-        set_encoder(self.index,0,len(self.menu)-1)        
-        display('', self.menu[self.index][0])
+        set_encoder(self.index,0,len(self.menu)-1)
+        lcd.clear()
+        lcd.putstr(f"{self.title:^20}")
+        display_ops(self.menu, self.index)
+        
         
         
 class GetInteger():
     "Get an integer value by scrolling (or turning the encoder shaft)"
     global menu_data
-    def __init__(self,low_v=0,high_v=100,increment=10, caption='plain',field='datafield',default=0):
+    def __init__(self,low_v=0,high_v=100,increment=10, caption='plain',field='datafield',default=0, save=False):
         self.field = field  #for collecting data
         self.caption = caption #caption is fixed in get_integer mode
         self.increment = increment
@@ -205,6 +247,7 @@ class GetInteger():
         self.default = default
         self.value = 0
         self.get_initial_value()
+        self.save = save
 
     def get_initial_value(self):
         #print('init value',self.value,self.increment,self.default,self.field)
@@ -219,24 +262,117 @@ class GetInteger():
         
       
     def on_scroll(self,val):
+        global lcd
         "Change the value displayed as we scroll"
+        #print(val)
         self.value = val
-        display(self.caption,str(val * self.increment))
+        lcd.move_to(0,2)
+        lcd.putstr(f"{self.value:<20}")
             
     def on_click(self):
         global menu_data
         "Store the displayed value and go back up the menu"
         menu_data[self.field]= self.value
+        if self.save:
+            with open("calibration.json", "r") as file:
+                cal = load(file)
+            cal[self.field] = self.value
+            with open("calibration.json", "w") as file:
+                dump(cal, file)
         back()
         
     def on_current(self):
         "Make sure encode is set properly, set up data and display"
+        global lcd
         self.get_initial_value()
-        print('get_int',menu_data,self.value,encoder.value())
-        set_encoder(self.value,self.low_v,self.high_v)
-        display(self.caption,str(self.value * self.increment))
+        # print('get_int',menu_data,self.value,encoder.value())
+        set_encoder(self.value,self.low_v,self.high_v + self.increment - 1, self.increment)
+        lcd.clear()
+        lcd.putstr(f"{self.caption:^20}")
+        lcd.move_to(0,2)
+        lcd.putstr(f"{self.value:<20}")
+        
 
+class Hist():
+    "Display measurement history."
+    def __init__(self,lcd, field, title):
+        self.index = 0
+        self.lcd = lcd
+        self.field = field
+        self.title = title
+        
+    def on_scroll(self,val):
+        self.index = val
+        display_hist(self.text, self.index)
+        
+        
+    def on_click(self):
+        back()
+    
+    def mount_hist(self):
+        global menu_data
+        self.hist = menu_data.get(self.field)
+        self.text = [f"{num:>02}; {i}" for num, i in enumerate(self.hist if self.hist else 100*["!!SEM LEITURAS!!"])]
+        # print(self.text[self.index -1][0])
+    
+    
+    def on_current(self):
+        self.mount_hist()
+        set_encoder(self.index,0,len(self.text)-1)
+        
+        display_hist(self.text, self.index)
+        
+        
+class Selection():
+    
+    "Return a string value from a menu like selection"
+    def __init__(self,field,choices, title):
+        global menu_data
+       # print('selection field',field)
+     #   print('menu data in init sel',menu_data)
+        def str2tuple(x):
+            if type (x) == str:
+                return (x,x)
+            else:
+                return x
+        self.field = field
+        self.title = title
+        #If value is string convert to (string,string)
+        self.choice =[str2tuple(x) for x in choices]
+    #    print(self.choice)
+        self.set_initial_value()
+        
+    def set_initial_value(self):
+        global menu_data
+        self.index = 0
+        for i,a in enumerate(self.choice):
+     #       print(self.field,a[1])
+            if menu_data.get(self.field,'zzz') == a[1]:
+            #   print('match')
+               self.index = i
+               break
+ 
+    
 
+    def on_scroll(self,val):
+        global lcd
+        self.index = val
+        display_ops(self.choice, self.index)
+        
+        
+    def on_click(self):
+        global menu_data
+        menu_data[self.field] = self.choice[self.index][1]         
+     #   print(menu_data)
+        back()
+        
+    def on_current(self):
+        global lcd
+        self.set_initial_value()
+        set_encoder(self.index,0,len(self.choice)-1)
+        lcd.clear()
+        lcd.putstr(f"{self.title:^20}")
+        display_ops(self.choice, self.index)
         
 class Wizard():
     global stack
@@ -293,59 +429,13 @@ class Info():
         back()
         
     def on_current(self):
-        oled.fill(0)
+        global lcd
+        lcd.clear()
         for i,a in enumerate(self.message.split('\n')):
-            oled.text(a,0,i*12)
-        oled.show()
+            lcd.move_to(0,i)
+            lcd.putstr(a)
         
-class Selection():
-    "Return a string value from a menu like selection"
-    def __init__(self,field,choices):
-        global menu_data
-       # print('selection field',field)
-     #   print('menu data in init sel',menu_data)
-        def str2tuple(x):
-            if type (x) == str:
-                return (x,x)
-            else:
-                return x
-        self.field = field
-        #If value is string convert to (string,string)
-        self.choice =[str2tuple(x) for x in choices]
-    #    print(self.choice)
-        self.set_initial_value()
-        
-    def set_initial_value(self):
-        global menu_data
-        self.index = 0
-        for i,a in enumerate(self.choice):
-     #       print(self.field,a[1])
-            if menu_data.get(self.field,'zzz') == a[1]:
-            #   print('match')
-               self.index = i
-               break
-               #break
-     #   print('init index',self.choice[self.index])
-    #    print(menu_data)
 
-    
-
-    def on_scroll(self,val):
-        self.index = val
-        display('',self.choice[self.index][0])
-        
-        
-    def on_click(self):
-        global menu_data
-        menu_data[self.field] = self.choice[self.index][1]         
-     #   print(menu_data)
-        back()
-        
-    def on_current(self):
-        self.set_initial_value()
-        set_encoder(self.index,0,len(self.choice)-1)
-        display('',self.choice[self.index][0])
-        
 #===================================
 # Functions for defining menus
  
@@ -356,9 +446,21 @@ def  wrap_object(myobject):
         set_current(myobject)
     return mywrap
 
-def wrap_menu(mymenulist):
+def wrap_menu(title, mymenulist):
     "wrap a list into a function so it can be set from within the menu"
-    return wrap_object(Menu(mymenulist))
+    return wrap_object(Menu(title, mymenulist))
+
+def hist(lcd, field, title):
+    "Wrap simple text output into menu"
+    return wrap_object(Hist(lcd, field, title))
+
+def selection(field, mylist, title):
+    "Wrap a selection into menu"
+    return wrap_object(Selection(field, mylist, title))
+
+def get_integer(low_v=0,high_v=100,increment=10, caption='plain',field='datafield',default='DEF', save=False):
+    "Wrap integer entry into menu"
+    return wrap_object(GetInteger(low_v,high_v,increment, caption,field,default, save))
 
 def wizard(mymenu):
     "Wrap a wizard list into a menu action"
@@ -367,15 +469,6 @@ def wizard(mymenu):
 def info(string):
     "Wrap simple text output into menu"
     return wrap_object(Info(string))
-
-def selection(field,mylist):
-    "Wrap a selection into menu"
-    return wrap_object(Selection(field,mylist))
-
-def get_integer(low_v=0,high_v=100,increment=10, caption='plain',field='datafield',default='DEF'):
-    "Wrap integer entry into menu"
-    return wrap_object(GetInteger(low_v,high_v,increment, caption,field,default))
-
 
 def dummy():
     "Just a valid dummy function to fill menu actions while we are developing"
